@@ -64,7 +64,8 @@
     "PlayerRespawnLogicChunkGuardMixin",
     "NitrogenUserDataAsyncMixin",
     "BukkitBStatsAsyncMixin",
-    "ItemEntityCollisionGuardMixin"
+    "ItemEntityCollisionGuardMixin",
+    "LevelGetBlockStateChunkGuardMixin"
   ],
   "client": [],
   "injectors": {
