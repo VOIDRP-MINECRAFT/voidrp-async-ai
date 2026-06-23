@@ -1,0 +1,37 @@
+.gradle/
+build/
+out/
+run/
+runs/
+.idea/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+.vscode/
+/bin/
+/.metadata/
+*.log
+*.tmp
+*.bak
+*.swp
+Thumbs.db
+.DS_Store
+
+# NeoForge runtime data
+logs/
+crash-reports/
+saves/
+options.txt
+usercache.json
+usernamecache.json
+eula.txt
+
+# Generated resources
+src/generated/
+
+# Gradle wrapper cache
+!gradle/wrapper/gradle-wrapper.properties
+!gradle/wrapper/gradlew-wrapper-missing.txt
