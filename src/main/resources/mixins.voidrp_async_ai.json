@@ -65,7 +65,9 @@
     "NitrogenUserDataAsyncMixin",
     "BukkitBStatsAsyncMixin",
     "ItemEntityCollisionGuardMixin",
-    "LevelGetBlockStateChunkGuardMixin"
+    "ItemEntityTickCollisionGuardMixin",
+    "LevelGetBlockStateChunkGuardMixin",
+    "TomsStorageTerminalOnLoadGuardMixin"
   ],
   "client": [],
   "injectors": {
