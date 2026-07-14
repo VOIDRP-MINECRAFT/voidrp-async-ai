@@ -52,7 +52,8 @@
     "BukkitBStatsAsyncMixin",
     "ItemEntityCollisionGuardMixin",
     "ItemEntityTickCollisionGuardMixin",
-    "LevelGetBlockStateChunkGuardMixin"
+    "LevelGetBlockStateChunkGuardMixin",
+    "ServerEntitySpawnPacketGuardMixin"
   ],
   "client": [],
   "injectors": {

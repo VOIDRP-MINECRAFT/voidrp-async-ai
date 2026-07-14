@@ -2,35 +2,33 @@ package ru.voidrp.asyncai.mixin;
 
 import net.minecraft.server.MinecraftServer;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import ru.voidrp.asyncai.VoidRpAsyncAI;
 
 /**
  * Throttles the periodic full autosave to reduce player time-out kicks on slow (HDD) disks.
  *
- * Problem (this server runs on a 5400rpm HDD): vanilla fires {@code MinecraftServer.autoSave()}
- * every AUTOSAVE_INTERVAL (6000 ticks = 5 min), which calls {@code saveEverything(true,…)} —
- * a synchronous full save (level.dat + all dirty region chunks + SavedData). On a saturated
- * spinning disk this freezes the main thread ~30-35 s, so online players stop receiving
- * keep-alives and get disconnected ("timed out"). Watchdog dumps show the thread parked in
- * {@code ServerLevel.save → NbtIo.writeCompressed}.
+ * Problem (this server runs on a 5400rpm HDD): the periodic autosave calls
+ * {@code MinecraftServer.saveEverything(true, false, false)} — a synchronous full save
+ * (level.dat + all dirty region chunks + SavedData). On a saturated spinning disk this
+ * freezes the main thread ~30-35 s, so online players stop receiving keep-alives and get
+ * disconnected ("timed out"). Watchdog dumps park in {@code saveEverything → NbtIo.writeCompressed}.
  *
- * Fix: only let {@code autoSave()} actually run once per {@link #MIN_INTERVAL_MS} (default
- * 15 min, override with {@code -Dvoidrp.autosave.minMinutes=<n>}). Skipped calls reschedule a
- * re-check ~1 min later. This does NOT touch the shutdown save ({@code saveAllChunks} in
- * stopServer) or a manual {@code /save-all}, so no data is lost beyond the widened autosave
- * window — a crash can lose at most the configured interval of progress (the server has a
- * Watchdog auto-restart). The real cure remains moving the world to an SSD.
+ * We hook {@code saveEverything(ZZZ)Z} rather than the vanilla {@code autoSave()} because
+ * this Youer/Purpur build patches its tick loop to call {@code saveEverything} directly and
+ * never routes through {@code autoSave()} (an earlier autoSave() mixin never fired).
+ *
+ * Distinguishing autosave from a save that MUST run: the periodic autosave is the only caller
+ * that passes {@code flush=false, forced=false}. Manual {@code /save-all} and the shutdown save
+ * pass {@code flush}/{@code forced == true}, so they are never throttled — no data loss beyond
+ * the widened autosave window (default 15 min, {@code -Dvoidrp.autosave.minMinutes} override).
+ * The server has a Watchdog auto-restart; the real cure is moving the world to an SSD.
  */
 @Mixin(MinecraftServer.class)
 public abstract class AutoSaveThrottleMixin {
-
-    @Shadow
-    private int ticksUntilAutosave;
 
     @Unique
     private static final long MIN_INTERVAL_MS = voidrp$resolveIntervalMs();
@@ -55,26 +53,38 @@ public abstract class AutoSaveThrottleMixin {
         return Math.max(0L, minutes) * 60_000L;
     }
 
-    @Inject(method = "autoSave", at = @At("HEAD"), cancellable = true, require = 0)
-    private void voidrp$throttleAutoSave(CallbackInfo ci) {
+    @Inject(
+        method = "saveEverything(ZZZ)Z",
+        at = @At("HEAD"),
+        cancellable = true,
+        require = 0
+    )
+    private void voidrp$throttleAutoSave(boolean suppressLog, boolean flush, boolean forced,
+                                         CallbackInfoReturnable<Boolean> cir) {
         if (MIN_INTERVAL_MS <= 0L) {
             return; // throttling disabled
+        }
+        // Only the periodic autosave passes flush=false & forced=false.
+        // Manual /save-all and shutdown pass true — always let those run.
+        if (flush || forced) {
+            return;
         }
         long now = System.currentTimeMillis();
         if (!voidrp$loggedInterval) {
             voidrp$loggedInterval = true;
             VoidRpAsyncAI.LOGGER.info(
-                "[VoidRP] Full autosave throttled to a minimum of {} min " +
+                "[VoidRP] Periodic autosave throttled to a minimum of {} min " +
                 "(override with -Dvoidrp.autosave.minMinutes). Reduces HDD save-freeze kicks.",
                 MIN_INTERVAL_MS / 60_000L);
         }
         if (voidrp$lastFullAutosaveMs != 0L && now - voidrp$lastFullAutosaveMs < MIN_INTERVAL_MS) {
-            // Too soon — skip this full save and re-check in ~1 min instead of every tick.
-            this.ticksUntilAutosave = 1200;
-            ci.cancel();
+            long agoS = (now - voidrp$lastFullAutosaveMs) / 1000L;
+            VoidRpAsyncAI.LOGGER.info(
+                "[VoidRP] Skipping periodic autosave ({}s since last; min {}min) — " +
+                "avoids HDD save-freeze kick.", agoS, MIN_INTERVAL_MS / 60_000L);
+            cir.setReturnValue(true); // report "saved" and skip the freeze
             return;
         }
-        // Allow it: vanilla will saveEverything() and reset ticksUntilAutosave itself.
-        voidrp$lastFullAutosaveMs = now;
+        voidrp$lastFullAutosaveMs = now; // allow it (vanilla proceeds with the full save)
     }
 }
