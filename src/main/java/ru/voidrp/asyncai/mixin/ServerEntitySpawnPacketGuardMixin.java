@@ -2,15 +2,13 @@ package ru.voidrp.asyncai.mixin;
 
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
-import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.server.level.ServerEntity;
 import net.minecraft.server.level.ServerPlayer;
+import net.neoforged.neoforge.network.bundle.PacketAndPayloadAcceptor;
 import org.spongepowered.asm.mixin.Mixin;
 import ru.voidrp.asyncai.VoidRpAsyncAI;
 
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Consumer;
 
 /**
  * Prevents a single broken entity spawn/pairing packet from crashing the whole server tick.
@@ -35,7 +33,7 @@ public abstract class ServerEntitySpawnPacketGuardMixin {
     @WrapMethod(method = "sendPairingData")
     private void voidrp$guardSpawnPacket(
             ServerPlayer player,
-            Consumer<Packet<? super ClientGamePacketListener>> consumer,
+            PacketAndPayloadAcceptor consumer,
             Operation<Void> original) {
         try {
             original.call(player, consumer);
