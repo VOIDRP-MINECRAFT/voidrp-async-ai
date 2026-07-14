@@ -5,12 +5,12 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.chunk.LevelChunk;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import ru.voidrp.asyncai.ChunkWarnRateLimit;
+import ru.voidrp.asyncai.MainThreadChunkLoad;
 import ru.voidrp.asyncai.VoidRpAsyncAI;
 
 /**
@@ -24,11 +24,13 @@ import ru.voidrp.asyncai.VoidRpAsyncAI;
  *   WrappedLevel delegates to Level.getBlockState() → ServerChunkCache.getChunk(FULL, true)
  *   → MainThreadExecutor.managedBlock() → LockSupport.parkNanos — server hangs.
  *
- * Fix: intercept getBlockState() at HEAD. If the target chunk is not immediately available
- * (getChunkNow == null), return AIR. Callers checking for lava/water/cobblestone patterns
- * treat AIR as "no fluid interaction" and fall back to normal drilling — no data loss.
- * Returning AIR for an unloaded chunk is safe because ticking blocks are always in loaded
- * chunks; only cross-chunk reads from chunk-boundary entities reach this path.
+ * Fix (updated 2026-07-14): delegate to {@link MainThreadChunkLoad#shouldServeUnloaded}.
+ *   - Off the main thread, or when the chunk cannot be brought to FULL within a small budget,
+ *     return AIR (as before — Create's cross-border generation read never parks the server).
+ *   - On the main thread, a chunk that already exists on disk is loaded within the budget and
+ *     the vanilla read proceeds against the REAL block. This unbreaks legitimate main-thread
+ *     reads that intentionally touch a generated-but-unloaded chunk — most visibly Waystones
+ *     teleport, whose resolveDestination() reads the destination waystone block directly.
  *
  * WorldGenLevel (world generation) is NOT ServerLevel, so this guard does not affect
  * terrain generation or structure placement.
@@ -54,8 +56,7 @@ public abstract class LevelGetBlockStateChunkGuardMixin {
         }
         int cx = pos.getX() >> 4;
         int cz = pos.getZ() >> 4;
-        LevelChunk chunk = serverLevel.getChunkSource().getChunkNow(cx, cz);
-        if (chunk == null) {
+        if (MainThreadChunkLoad.shouldServeUnloaded(serverLevel, cx, cz)) {
             long suppressed = ChunkWarnRateLimit.acquire(cx, cz);
             if (suppressed >= 0) {
                 VoidRpAsyncAI.LOGGER.warn(

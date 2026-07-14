@@ -4,12 +4,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.chunk.LevelChunk;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import ru.voidrp.asyncai.ChunkWarnRateLimit;
+import ru.voidrp.asyncai.MainThreadChunkLoad;
 import ru.voidrp.asyncai.VoidRpAsyncAI;
 
 /**
@@ -26,14 +26,14 @@ import ru.voidrp.asyncai.VoidRpAsyncAI;
  * entities (inventory targets) every tick. If the neighbor chunk is unloaded the
  * main thread parks indefinitely, triggering Watchdog.
  *
- * Fix: intercept getBlockEntity at HEAD on ServerLevel. If the target chunk is not
- * immediately available (getChunkNow == null) return null. CapManipulationBehaviourBase
- * treats null as "no inventory found" and retries next tick — no data loss.
- * getBlockEntity is already @Nullable; all callers must handle null by contract.
- *
- * This guard covers ALL callers of Level.getBlockEntity() on the server thread, not just
- * Create, since any mod that calls getBlockEntity on an unloaded chunk border deadlocks
- * the same way.
+ * Fix (updated 2026-07-14): delegate to {@link MainThreadChunkLoad#shouldServeUnloaded}.
+ *   - Off the main thread, or when the chunk cannot be brought to FULL within a small budget,
+ *     return null (as before — the Create funnel border scan never parks the server).
+ *   - On the main thread, a chunk that already exists on disk is loaded within the budget and
+ *     the vanilla lookup proceeds, returning the REAL block entity. This unbreaks legitimate
+ *     main-thread reads that touch a generated-but-unloaded chunk — most visibly Waystones,
+ *     whose WaystoneManagerImpl.getWaystoneAt() reads the destination block entity directly.
+ *   getBlockEntity is already @Nullable; all callers must handle null by contract.
  */
 @Mixin(Level.class)
 public abstract class LevelGetBlockEntityChunkGuardMixin {
@@ -50,8 +50,7 @@ public abstract class LevelGetBlockEntityChunkGuardMixin {
         }
         int cx = pos.getX() >> 4;
         int cz = pos.getZ() >> 4;
-        LevelChunk chunk = serverLevel.getChunkSource().getChunkNow(cx, cz);
-        if (chunk == null) {
+        if (MainThreadChunkLoad.shouldServeUnloaded(serverLevel, cx, cz)) {
             long suppressed = ChunkWarnRateLimit.acquire(cx, cz);
             if (suppressed >= 0) {
                 if (suppressed > 0) {

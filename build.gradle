@@ -36,11 +36,10 @@ configurations {
 
 dependencies {
     implementation "net.neoforged:neoforge:${neo_version}"
-    compileOnly files('../minecraft_server/mods/mahoutsukai-1.21.1-v1.36.8.jar')
+    // Hard @Mixin(Class) references need the mod on the compile classpath (string-target
+    // remap=false mixins do not). Kept in sync with the FTB Evolution pack in ../minecraft_server/mods.
     compileOnly files('../minecraft_server/mods/ImmersiveEngineering-1.21.1-12.4.2-194.jar')
-    compileOnly files('../minecraft_server/mods/aether-1.21.1-1.5.10-neoforge.jar')
-    compileOnly files('../minecraft_server/mods/accessories-neoforge-1.1.0-beta.53+1.21.1.jar')
-    compileOnly files('../minecraft_server/mods/create-1.21.1-6.0.9.jar')
+    compileOnly files('../minecraft_server/mods/create-1.21.1-6.0.10.jar')
 }
 
 tasks.withType(ProcessResources).configureEach {
