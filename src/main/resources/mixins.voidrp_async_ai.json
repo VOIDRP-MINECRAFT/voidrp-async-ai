@@ -53,7 +53,8 @@
     "ItemEntityCollisionGuardMixin",
     "ItemEntityTickCollisionGuardMixin",
     "LevelGetBlockStateChunkGuardMixin",
-    "ServerEntitySpawnPacketGuardMixin"
+    "ServerEntitySpawnPacketGuardMixin",
+    "ServerPlayerNullConnectionMessageGuardMixin"
   ],
   "client": [],
   "injectors": {
