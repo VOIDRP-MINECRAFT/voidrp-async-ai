@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    name: Gradle build
+    name: Gradle build (with mod deps)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,11 +24,23 @@ jobs:
           distribution: temurin
           cache: gradle
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
       - name: Neutralize local dev proxy (CI only)
         run: '[ -f gradle.properties ] && sed -i "/[Pp]roxy/d" gradle.properties || true'
+
+      # build.gradle compiles a couple of mixins against Create and Immersive
+      # Engineering (compileOnly ../minecraft_server/mods/*.jar). Fetch those exact
+      # jars from Modrinth into the expected location.
+      - name: Fetch mod compile deps
+        run: |
+          mkdir -p ../minecraft_server/mods
+          curl -sSL -A 'voidrp-ci' -o ../minecraft_server/mods/create-1.21.1-6.0.10.jar \
+            https://cdn.modrinth.com/data/LNytGWDc/versions/UjX6dr61/create-1.21.1-6.0.10.jar
+          curl -sSL -A 'voidrp-ci' -o ../minecraft_server/mods/ImmersiveEngineering-1.21.1-12.4.2-194.jar \
+            https://cdn.modrinth.com/data/tIm2nV03/versions/uNRARSH2/ImmersiveEngineering-1.21.1-12.4.2-194.jar
+          ls -la ../minecraft_server/mods
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
       - name: Build
         run: ./gradlew build --stacktrace --no-daemon
