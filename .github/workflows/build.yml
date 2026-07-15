@@ -27,6 +27,9 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Neutralize local dev proxy (CI only)
+        run: '[ -f gradle.properties ] && sed -i "/[Pp]roxy/d" gradle.properties || true'
+
       - name: Build
         run: ./gradlew build --stacktrace --no-daemon
 
