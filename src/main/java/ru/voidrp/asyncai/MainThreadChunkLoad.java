@@ -33,9 +33,8 @@ public final class MainThreadChunkLoad {
     /** Max wall-time to spend pumping the chunk executor for a single chunk. */
     private static final long SINGLE_BUDGET_NS = 300_000_000L;   // 300 ms
 
-    /** Max total bounded-loading per ~tick window (safety cap against many-distinct-chunk bursts). */
+    /** Max total bounded-loading per server-tick window (safety cap against many-distinct-chunk bursts). */
     private static final long WINDOW_BUDGET_NS = 600_000_000L;   // 600 ms
-    private static final long WINDOW_NS        = 50_000_000L;    // ~1 tick
 
     /** How long to skip re-attempting a chunk after a bounded attempt. */
     private static final long COOLDOWN_NS      = 30_000_000_000L; // 30 s
@@ -43,8 +42,13 @@ public final class MainThreadChunkLoad {
     // packed (cx<<32|cz) → last attempt nanoTime
     private static final ConcurrentHashMap<Long, Long> LAST_ATTEMPT = new ConcurrentHashMap<>();
 
-    // Per-window budget accounting (main-thread only).
-    private static long windowStartNs = 0L;
+    // Per-window budget accounting (main-thread only). The window is keyed on the server
+    // TICK COUNT, not wall-clock: a long synchronous burst (e.g. Draconic Evolution's
+    // CometSpawner generating a comet trail across ungenerated terrain) blocks the main
+    // thread, so the tick counter does NOT advance and the budget cannot refill mid-burst.
+    // A wall-clock window used to refill every ~50 ms even while the main thread was parked
+    // inside a bounded load, letting one burst spend seconds of loading and trip the Watchdog.
+    private static int  windowTick    = Integer.MIN_VALUE;
     private static long windowSpentNs = 0L;
 
     private MainThreadChunkLoad() {}
@@ -77,14 +81,17 @@ public final class MainThreadChunkLoad {
             return true; // recently attempted — skip re-pumping, serve AIR/null
         }
 
-        // Refill the per-window budget if we rolled into a new tick window.
-        if (now - windowStartNs >= WINDOW_NS) {
-            windowStartNs = now;
+        // Refill the per-window budget only when a real server tick has elapsed. During a
+        // single synchronous burst the main thread is blocked, so getTickCount() is frozen
+        // and the budget stays exhausted → the burst is hard-capped at WINDOW_BUDGET_NS.
+        int tick = level.getServer().getTickCount();
+        if (tick != windowTick) {
+            windowTick = tick;
             windowSpentNs = 0L;
         }
         long remaining = WINDOW_BUDGET_NS - windowSpentNs;
         if (remaining <= 0L) {
-            return true; // window budget exhausted — serve AIR/null this tick
+            return true; // window budget exhausted this tick — serve AIR/null
         }
 
         long budget = Math.min(SINGLE_BUDGET_NS, remaining);

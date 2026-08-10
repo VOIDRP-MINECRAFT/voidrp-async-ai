@@ -11,6 +11,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import ru.voidrp.asyncai.VoidRpAsyncAI;
+import ru.voidrp.asyncai.WorldgenReentryGuard;
 
 /**
  * Prevents the server from hanging when LevelChunk.postProcessGeneration() is called
@@ -54,7 +55,15 @@ public abstract class PostProcessFluidGuardMixin {
         int[] budget = voidrp_fluidBudget.get();
         if (budget[0] > 0) {
             budget[0]--;
-            fluidState.tick(level, pos);
+            // Mark the re-entrant world-gen window so SablePhysicsWorldgenGuardMixin
+            // can skip physics block-change handling that would otherwise issue a
+            // blocking main-thread chunk load and deadlock the generation pipeline.
+            WorldgenReentryGuard.enter();
+            try {
+                fluidState.tick(level, pos);
+            } finally {
+                WorldgenReentryGuard.exit();
+            }
         } else if (budget[0] == 0) {
             // Log exactly once per postProcessGeneration call (not per skipped block).
             // budget[0] was reset to MAX at HEAD, so 0 means we just hit the limit now.

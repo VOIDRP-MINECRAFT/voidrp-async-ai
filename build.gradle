@@ -40,6 +40,8 @@ dependencies {
     // remap=false mixins do not). Kept in sync with the FTB Evolution pack in ../minecraft_server/mods.
     compileOnly files('../minecraft_server/mods/ImmersiveEngineering-1.21.1-12.4.2-194.jar')
     compileOnly files('../minecraft_server/mods/create-1.21.1-6.0.10.jar')
+    compileOnly files('../minecraft_server/mods/sable-neoforge-1.21.1-2.0.3.jar')
+    compileOnly files('../minecraft_server/mods/ars_nouveau-1.21.1-5.12.1.jar')
 }
 
 tasks.withType(ProcessResources).configureEach {
