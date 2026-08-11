@@ -10,7 +10,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import ru.voidrp.asyncai.ChunkWarnRateLimit;
-import ru.voidrp.asyncai.MainThreadChunkLoad;
 import ru.voidrp.asyncai.VoidRpAsyncAI;
 
 /**
@@ -55,7 +54,20 @@ public interface LevelGetNoiseBiomeChunkGuardMixin {
         }
         int cx = QuartPos.toSection(x);
         int cz = QuartPos.toSection(z);
-        if (MainThreadChunkLoad.shouldServeUnloaded(serverLevel, cx, cz)) {
+        // A biome lookup NEVER needs a real chunk load: getUncachedNoiseBiome computes the
+        // biome straight from the generator's biome source + climate sampler — exactly the
+        // fallback vanilla's own getNoiseBiome uses when the chunk is null. So if the chunk
+        // isn't already resident, serve that immediately and do NOT attempt a bounded load.
+        //
+        // Why stricter than the sibling block/entity guards (which DO bounded-load, e.g. for
+        // Waystones): a bounded load drives the chunk executor via managedBlock, and a single
+        // dequeued task can be a fluid-heavy postProcessGeneration (FlowingFluid.spread →
+        // createaddition spreadFire → setBlock) that runs past the deadline and trips the
+        // Watchdog. Eternal Starlight's ESCommonHandler.onEntityTick probes getBiome every
+        // living tick, so an entity near ungenerated terrain would pump that path every tick
+        // (Watchdog dump 2026-08-11, Evolution). Biomes don't need the real chunk, so we
+        // never open that door here.
+        if (serverLevel.getChunkSource().getChunkNow(cx, cz) == null) {
             long suppressed = ChunkWarnRateLimit.acquire(cx, cz);
             if (suppressed >= 0) {
                 VoidRpAsyncAI.LOGGER.warn(
