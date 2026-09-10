@@ -74,6 +74,16 @@ public final class ChunkPreloadManager {
 
     private static final AtomicInteger submittedThisTick = new AtomicInteger();
 
+    // ---- Явные запросы области (телепорты, порталы, варпы) ------------------
+    // Отдельный бюджет: предсказание по вектору движения и явная точка
+    // назначения не должны конкурировать. Пункт назначения известен точно,
+    // поэтому он важнее любых догадок и идёт вне общей очереди.
+    private static final int EXPLICIT_SUBMIT_PER_TICK = 24;
+    private static final int EXPLICIT_QUEUE_CAP = 512;
+    /** Очередь явных запросов: chunkKey → уровень. Обрабатывается в начале тика. */
+    private static final Map<Long, ServerLevel> explicitQueue = new ConcurrentHashMap<>();
+    private static final AtomicInteger explicitSubmittedThisTick = new AtomicInteger();
+
     private ChunkPreloadManager() {}
 
     // -------------------------------------------------------------------------
@@ -87,9 +97,71 @@ public final class ChunkPreloadManager {
     }
 
     public static void shutdown() {
+        explicitQueue.clear();
         inFlight.clear();
         lastPos.clear();
         smoothVel.clear();
+    }
+
+    // -------------------------------------------------------------------------
+    // Явный прогрев области
+    // -------------------------------------------------------------------------
+
+    /**
+     * Просит сгенерировать область вокруг чанка — неблокирующе.
+     *
+     * <p>Зачем это нужно отдельно от предсказания: предсказание строится на
+     * векторе скорости игрока, а телепорт — это разрыв, вектора в точку
+     * назначения не существует. Раньше генерацию там не запускал никто:
+     * гуарды (см. AbsMoveToChunkGuardMixin) специально НЕ грузят чанк на
+     * главном потоке, чтобы не повесить сервер, и молча сдаются. В итоге
+     * местность начинала генерироваться только когда до неё доползал штатный
+     * тикет игрока — на дальней несгенерированной точке это растягивалось на
+     * минуты, и телепорт выглядел как неработающая команда.
+     *
+     * <p>Вызывать можно с любого потока: заявка кладётся в очередь и
+     * отправляется в начале следующего тика на главном потоке.
+     *
+     * @param radius радиус в чанках вокруг центра (0 — только сам чанк)
+     */
+    public static void requestArea(ServerLevel level, int centerChunkX, int centerChunkZ, int radius) {
+        if (!ConfigCache.CHUNK_PRELOAD_ENABLED || level == null) return;
+        if (explicitQueue.size() >= EXPLICIT_QUEUE_CAP) return;
+        int r = Math.max(0, Math.min(radius, 4));
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dz = -r; dz <= r; dz++) {
+                if (explicitQueue.size() >= EXPLICIT_QUEUE_CAP) return;
+                explicitQueue.putIfAbsent(ChunkPos.asLong(centerChunkX + dx, centerChunkZ + dz), level);
+            }
+        }
+    }
+
+    /** Удобная обёртка: прогреть область вокруг блочных координат. */
+    public static void requestAreaAtBlock(ServerLevel level, double blockX, double blockZ, int radius) {
+        requestArea(level,
+            SectionPos.blockToSectionCoord((int) blockX),
+            SectionPos.blockToSectionCoord((int) blockZ),
+            radius);
+    }
+
+    /** Отправляет накопленные явные заявки. Только главный поток. */
+    private static void drainExplicit() {
+        if (explicitQueue.isEmpty()) return;
+        explicitSubmittedThisTick.set(0);
+        Iterator<Map.Entry<Long, ServerLevel>> it = explicitQueue.entrySet().iterator();
+        while (it.hasNext() && explicitSubmittedThisTick.get() < EXPLICIT_SUBMIT_PER_TICK) {
+            Map.Entry<Long, ServerLevel> e = it.next();
+            ServerLevel level = e.getValue();
+            int cx = ChunkPos.getX(e.getKey());
+            int cz = ChunkPos.getZ(e.getKey());
+            it.remove();
+            ServerChunkCache scc = level.getChunkSource();
+            if (scc.getChunkNow(cx, cz) != null) continue;   // уже готов
+            if (inFlight.putIfAbsent(e.getKey(), level) != null) continue;
+            explicitSubmittedThisTick.incrementAndGet();
+            ChunkPos cp = new ChunkPos(cx, cz);
+            scc.addRegionTicket(TicketType.UNKNOWN, cp, TICKET_LEVEL, cp);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -105,6 +177,9 @@ public final class ChunkPreloadManager {
         boolean lagging = load > 1.4;
 
         submittedThisTick.set(0);
+
+        // Явные пункты назначения — раньше догадок по вектору движения.
+        drainExplicit();
 
         for (ServerLevel level : server.getAllLevels()) {
             if (!isSafeToPreload(level)) continue;

@@ -7,6 +7,7 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import ru.voidrp.asyncai.ChunkPreloadManager;
 import ru.voidrp.asyncai.ChunkWarnRateLimit;
 import ru.voidrp.asyncai.VoidRpAsyncAI;
 
@@ -54,6 +55,13 @@ public abstract class AbsMoveToChunkGuardMixin {
         if (level instanceof ServerLevel serverLevel) {
             LevelChunk chunk = serverLevel.getChunkSource().getChunkNow(cx, cz);
             if (chunk == null) {
+                // Пропустить блокирующую загрузку — правильно, но раньше на этом
+                // всё и заканчивалось: генерацию в точке назначения не запускал
+                // никто, и она стартовала лишь когда туда доползал штатный тикет
+                // игрока. На дальнем телепорте это давало задержку в минуты.
+                // Теперь просим сгенерировать область явно и неблокирующе.
+                ChunkPreloadManager.requestArea(serverLevel, cx, cz, 1);
+
                 long suppressed = ChunkWarnRateLimit.acquire(cx, cz);
                 if (suppressed >= 0) {
                     if (suppressed > 0) {

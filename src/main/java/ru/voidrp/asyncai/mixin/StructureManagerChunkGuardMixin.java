@@ -16,6 +16,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import ru.voidrp.asyncai.ChunkWarnRateLimit;
 import ru.voidrp.asyncai.VoidRpAsyncAI;
 
@@ -196,5 +197,57 @@ public abstract class StructureManagerChunkGuardMixin {
         }
 
         ci.cancel();
+    }
+
+    /**
+     * Root cause #5 (2026-09-10 20:46): a plain {@code /tp} into ungenerated terrain froze the
+     * server for seconds and tripped the Watchdog. Main thread stack:
+     *
+     * <pre>
+     *   netherman MansionCheckHandler.onPlayerTick   ← runs EVERY player tick
+     *     → StructureManager.getStructureAt
+     *     → StructureManager.startsForStructure(SectionPos, Structure)
+     *     → LevelReader.getChunk(x, z, STRUCTURE_REFERENCES)   ← blocks, generates the chunk
+     *     → ServerChunkCache$MainThreadExecutor.managedBlock → LockSupport.parkNanos
+     * </pre>
+     *
+     * The three {@code @Redirect}s above only convert a *thrown* lookup into an empty result —
+     * they do nothing about the far more common case where the call simply blocks while the
+     * chunk generates. This guard closes that: if the section's chunk is not already resident,
+     * report "no structure here" instead of stalling the tick to find out.
+     *
+     * <p>Semantics: a structure lookup against a chunk that is not loaded is deferred, not
+     * wrong — the same trade-off {@code fillStartsForStructure} above already makes. A mod
+     * polling "am I in a mansion?" every tick gets a false for one tick and a correct answer
+     * once the chunk is in, which is vastly better than freezing every player on the server.
+     */
+    @Inject(
+        method = "startsForStructure(Lnet/minecraft/core/SectionPos;Lnet/minecraft/world/level/levelgen/structure/Structure;)Ljava/util/List;",
+        at = @At("HEAD"),
+        cancellable = true,
+        require = 0
+    )
+    private void voidrp_nonBlockingStartsForStructure(
+            SectionPos sectionPos, Structure structure, CallbackInfoReturnable<List<StructureStart>> cir) {
+        if (LEVEL_FIELD == null) return;
+
+        LevelReader levelReader;
+        try {
+            levelReader = (LevelReader) LEVEL_FIELD.get(this);
+        } catch (Exception e) {
+            return;
+        }
+        if (!(levelReader instanceof ServerLevel serverLevel)) return;
+
+        if (serverLevel.getChunkSource().getChunkNow(sectionPos.x(), sectionPos.z()) == null) {
+            long suppressed = ChunkWarnRateLimit.acquire(sectionPos.x(), sectionPos.z());
+            if (suppressed >= 0) {
+                VoidRpAsyncAI.LOGGER.warn(
+                    "[VoidRP] StructureManager.startsForStructure guard — chunk [{},{}] not resident," +
+                    " returning no structures instead of blocking the main thread to generate it{}",
+                    sectionPos.x(), sectionPos.z(), suppressed > 0 ? " (+" + suppressed + " suppressed)" : "");
+            }
+            cir.setReturnValue(List.of());
+        }
     }
 }

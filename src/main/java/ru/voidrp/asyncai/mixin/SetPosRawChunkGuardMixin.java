@@ -7,6 +7,7 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import ru.voidrp.asyncai.ChunkPreloadManager;
 import ru.voidrp.asyncai.ChunkWarnRateLimit;
 import ru.voidrp.asyncai.VoidRpAsyncAI;
 
@@ -48,6 +49,10 @@ public abstract class SetPosRawChunkGuardMixin {
         if (level instanceof ServerLevel serverLevel) {
             LevelChunk chunk = serverLevel.getChunkSource().getChunkNow(cx, cz);
             if (chunk == null) {
+                // Тот же приём, что в AbsMoveToChunkGuardMixin: блокирующую
+                // загрузку пропускаем, но генерацию в этой точке всё-таки
+                // запускаем — иначе её не запустит вообще никто.
+                ChunkPreloadManager.requestArea(serverLevel, cx, cz, 1);
                 long suppressed = ChunkWarnRateLimit.acquire(cx, cz);
                 if (suppressed >= 0) {
                     if (suppressed > 0) {
