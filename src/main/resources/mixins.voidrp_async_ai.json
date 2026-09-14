@@ -5,6 +5,7 @@
   "compatibilityLevel": "JAVA_21",
   "refmap": "mixins.voidrp_async_ai.refmap.json",
   "mixins": [
+    "HardcoreDarknessReadinessTimeoutMixin",
     "PathNavigationMixin",
     "NavigationThrottleMixin",
     "EntityHibernateMixin",
