@@ -47,6 +47,7 @@ public final class NullFilteringSetView<T> implements Set<T> {
         return new Iterator<>() {
             private T next;
             private boolean hasNext;
+            private T lastReturned;
 
             private void advance() {
                 while (!hasNext) {
@@ -84,12 +85,21 @@ public final class NullFilteringSetView<T> implements Set<T> {
                 T value = next;
                 next = null;
                 hasNext = false;
+                lastReturned = value;
                 return value;
             }
 
             @Override
             public void remove() {
-                it.remove();
+                // The backing set may be a CopyOnWriteArraySet, whose snapshot
+                // iterator does not support remove(); route the removal through the
+                // set itself so callers that iterate-and-remove keep working
+                // regardless of the backing implementation.
+                if (lastReturned == null) {
+                    throw new IllegalStateException();
+                }
+                backing.remove(lastReturned);
+                lastReturned = null;
             }
         };
     }
