@@ -3,6 +3,7 @@ name: Build
 on:
   push:
     branches: ['**']
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -14,11 +15,13 @@ jobs:
   build:
     name: Gradle build (with mod deps)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '21'
           distribution: temurin
@@ -27,16 +30,33 @@ jobs:
       - name: Neutralize local dev proxy (CI only)
         run: '[ -f gradle.properties ] && sed -i "/[Pp]roxy/d" gradle.properties || true'
 
-      # build.gradle compiles a couple of mixins against Create and Immersive
-      # Engineering (compileOnly ../minecraft_server/mods/*.jar). Fetch those exact
-      # jars from Modrinth into the expected location.
+      # build.gradle compiles a few mixins against other mods (compileOnly
+      # ../minecraft_server/mods/<file>.jar, never shipped): Create, Immersive
+      # Engineering, Sable, Ars Nouveau. Fetch each of those exact files from Modrinth —
+      # the project is looked up by the jar's name, the file by its exact filename —
+      # so a jar added to build.gradle is picked up without touching this workflow.
       - name: Fetch mod compile deps
         run: |
+          api=https://api.modrinth.com/v2
+          ua='voidrp-ci (github.com/VOIDRP-MINECRAFT)'
+          gv='%5B%221.21.1%22%5D'
           mkdir -p ../minecraft_server/mods
-          curl -sSL -A 'voidrp-ci' -o ../minecraft_server/mods/create-1.21.1-6.0.10.jar \
-            https://cdn.modrinth.com/data/LNytGWDc/versions/UjX6dr61/create-1.21.1-6.0.10.jar
-          curl -sSL -A 'voidrp-ci' -o ../minecraft_server/mods/ImmersiveEngineering-1.21.1-12.4.2-194.jar \
-            https://cdn.modrinth.com/data/tIm2nV03/versions/uNRARSH2/ImmersiveEngineering-1.21.1-12.4.2-194.jar
+          for jar in $(grep -oE "\.\./minecraft_server/mods/[^'\"]+\.jar" build.gradle | sort -u); do
+            name=$(basename "$jar")
+            base=$(echo "$name" | sed -E 's/-(neoforge-)?1\.21.*$//I')
+            slug=$(echo "$base" | tr 'A-Z_' 'a-z-')
+            query=$(jq -rn --arg q "${base//_/ }" '$q|@uri')
+            ids="$slug $(curl -sSL -A "$ua" "$api/search?limit=5&query=$query&facets=%5B%5B%22versions:1.21.1%22%5D%5D" | jq -r '.hits[]?.project_id')"
+            url=
+            for id in $ids; do
+              url=$(curl -sSL -A "$ua" "$api/project/$id/version?game_versions=$gv" \
+                | jq -r --arg n "$name" 'if type == "array" then ([.[].files[] | select(.filename == $n) | .url][0] // empty) else empty end')
+              [ -n "$url" ] && break
+            done
+            [ -n "$url" ] || { echo "::error::$name not found on Modrinth"; exit 1; }
+            curl -sSL -A "$ua" -o "$jar" "$url"
+            echo "$name <- $url"
+          done
           ls -la ../minecraft_server/mods
 
       - name: Grant execute permission for gradlew
@@ -47,9 +67,18 @@ jobs:
 
       - name: Upload jars
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: jars
           path: '**/build/libs/*.jar'
           if-no-files-found: warn
           retention-days: 14
+
+      # A tag like v1.2.0 publishes the built jars as a GitHub release, so the server
+      # owner downloads a file instead of building one.
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/libs/*.jar
+          generate_release_notes: true
