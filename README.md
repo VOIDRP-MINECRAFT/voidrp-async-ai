@@ -1,7 +1,6 @@
-# ⚡ VoidRP Async AI
+<p align="center"><img src=".github/assets/banner.jpg" alt="VoidRP Async AI" width="100%"></p>
 
-> Серверный NeoForge-мод производительности VoidRP: async pathfinding, троттлинг AI по расстоянию и 65 миксинов,
-> которые не дают сторонним модам повесить главный поток или уронить сервер.
+<div align="center">
 
 ![Minecraft](https://img.shields.io/badge/Minecraft-1.21.1-brightgreen?logo=minecraft)
 ![NeoForge](https://img.shields.io/badge/NeoForge-21.1.x-orange)
@@ -9,6 +8,11 @@
 ![Mixins](https://img.shields.io/badge/mixins-65-blueviolet)
 [![Build](https://github.com/VOIDRP-MINECRAFT/voidrp-async-ai/actions/workflows/build.yml/badge.svg)](https://github.com/VOIDRP-MINECRAFT/voidrp-async-ai/actions/workflows/build.yml)
 ![License](https://img.shields.io/badge/license-proprietary-red)
+
+</div>
+
+> Серверный NeoForge-мод производительности VoidRP: async pathfinding, троттлинг AI по расстоянию и 65 миксинов,
+> которые не дают сторонним модам повесить главный поток или уронить сервер.
 
 ---
 
